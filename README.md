@@ -25,7 +25,7 @@ gcc -o lfmt.so -O3 -fPIC -shared lfmt.c
 # macOS
 gcc -o lfmt.so -O3 -fPIC -shared -undefined dynamic_lookup lfmt.c
 # Windows
-cl /Fe lfmt.dll /LD /MT /O2 /DLUA_BUILD_AS_DLL /Ipath/to/lua/include lfmt.c path/to/lua/lib
+cl /Fefmt.dll /LD /MT /O2 /DLUA_BUILD_AS_DLL /Ipath/to/lua/include lfmt.c path/to/lua/lib
 ```
 
 # Example
