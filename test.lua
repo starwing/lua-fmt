@@ -52,6 +52,8 @@ function _G.test_basic()
       function() fmt("{1} {}", 1) end)
    fail("Too many decimal digits in format string",
       function() fmt("{:10000000000d}", 1) end)
+   fail("expected '}' before end of string",
+      function() fmt("{:{", 1) end)
 end
 
 function _G.test_int()
