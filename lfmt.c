@@ -193,10 +193,10 @@ static int fmt_readint(fmt_State *S, int required, const char *name) {
 
 static int fmt_spec(fmt_State *S, fmt_Spec *d) {
     /* [[fill]align][sign]["#"]["0"][width][grouping]["." precision][type] */
-    if (*S->p == '<' || *S->p == '>' || *S->p == '^')
-        d->align = fmt_readchar(S);
-    else if (S->p[1] == '<' || S->p[1] == '>' || S->p[1] == '^')
+    if (S->p[1] == '<' || S->p[1] == '>' || S->p[1] == '^')
         d->fill  = fmt_readchar(S), d->align = fmt_readchar(S);
+    else if (*S->p == '<' || *S->p == '>' || *S->p == '^')
+        d->align = fmt_readchar(S);
     if (*S->p == ' ' || *S->p == '+' || *S->p == '-')
         d->sign = fmt_readchar(S);
     if (*S->p == '#') d->alter = fmt_readchar(S);
@@ -494,5 +494,5 @@ LUALIB_API int luaopen_fmt(lua_State *L) {
  * unixcc: flags+='-shared -fPIC' output='fmt.so'
  * maccc: flags+='-undefined dynamic_lookup'
  * win32cc: flags+='-s -mdll -DLUA_BUILD_AS_DLL '
- * win32cc: libs+='-llua53' output='fmt.dll' */
+ * win32cc: libs+='-llua54' output='fmt.dll' */
 
