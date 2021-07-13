@@ -184,7 +184,7 @@ static int fmt_readint(fmt_State *S, int required, const char *name) {
         fmt_argid(S, fmt_value(S, 2));
         fmt_check(S, *S->p == '}', "unexpected '%c' in field name", *S->p);
         ++S->p;
-        v = lua_tointegerx(S->L, fmt_value(S, 2), &isint);
+        v = (int)lua_tointegerx(S->L, fmt_value(S, 2), &isint);
         fmt_check(S, isint, "integer expected for %s, got %s",
                 name, luaL_typename(S->L, fmt_value(S, 2)));
     }
@@ -363,7 +363,7 @@ static void fmt_dumpint(fmt_State *S, lua_Integer v, const fmt_Spec *d) {
     if ((p[-1] = fmt_writesign(sign, d->sign)) != 0) --p;
     if (d->zero && d->width > FMT_INTBUFFSIZ - (p-buff)) {
         if (dp > p) luaL_addlstring(&S->B, p, dp - p);
-        width -= (dp - p), p = dp;
+        width -= (int)(dp - p), p = dp;
     }
     lua_pushlstring(S->L, p, FMT_INTBUFFSIZ - (p-buff));
     lua_replace(S->L, fmt_value(S,1));
@@ -400,7 +400,7 @@ static void fmt_dumpflt(fmt_State *S, lua_Number v, const fmt_Spec *d) {
     len = fmt_writeflt(dp, FMT_FLTBUFFSIZ - (dp-buff), v, d);
     if (d->zero && width > len) {
         if (dp > p) luaL_addlstring(&S->B, buff, dp - p);
-        width -= (dp - buff), p = dp;
+        width -= (int)(dp - buff), p = dp;
     }
     lua_pushlstring(S->L, p, len);
     lua_replace(S->L, fmt_value(S,1));
