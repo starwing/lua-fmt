@@ -458,6 +458,7 @@ static int fmt_format(fmt_State *S) {
         const char *p = S->p;
         while (p < S->e && *p != '{' && *p != '}') ++p;
         luaL_addlstring(&S->B, S->p, p - S->p), S->p = p;
+        if (S->p >= S->e) break;
         if (*S->p == S->p[1])
             luaL_addchar(&S->B, *S->p), S->p += 2;
         else {
