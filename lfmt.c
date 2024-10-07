@@ -166,7 +166,6 @@ typedef struct fmt_Spec {
     int grouping;  /* '_', ',' */
     int precision;
     int type;
-    int changed;
 } fmt_Spec;
 
 static int fmt_readchar(fmt_State *S, const char **pp, const char *e) {
@@ -199,19 +198,16 @@ static void fmt_spec(fmt_State *S, fmt_Spec *d, const char **pp, const char *e) 
     const char *p = *pp;
     if (p[1] == '<' || p[1] == '>' || p[1] == '^') {
         d->fill  = fmt_readchar(S, &p, e);
-        d->align = fmt_readchar(S, &p, e), d->changed = 1;
+        d->align = fmt_readchar(S, &p, e);
     } else if (*p == '<' || *p == '>' || *p == '^')
-        d->align = fmt_readchar(S, &p, e), d->changed = 1;
+        d->align = fmt_readchar(S, &p, e);
     if (*p == ' ' || *p == '+' || *p == '-')
-        d->sign = fmt_readchar(S, &p, e), d->changed = 1;
-    if (*p == '#') d->alter = fmt_readchar(S, &p, e), d->changed = 1;
-    if (*p == '0') d->zero  = fmt_readchar(S, &p, e), d->changed = 1;
-    if (fmt_isdigit(*p) || *p == '{')
-        d->width = fmt_readint(S, "width", &p, e), d->changed = 1;
-    if (*p == '_' || *p == ',')
-        d->grouping = fmt_readchar(S, &p, e), d->changed = 1;
-    if (*p == '.')
-        ++p, d->precision = fmt_readint(S, "precision", &p, e), d->changed = 1;
+        d->sign = fmt_readchar(S, &p, e);
+    if (*p == '#') d->alter = fmt_readchar(S, &p, e);
+    if (*p == '0') d->zero  = fmt_readchar(S, &p, e);
+    if (fmt_isdigit(*p) || *p == '{') d->width = fmt_readint(S, "width", &p, e);
+    if (*p == '_' || *p == ',') d->grouping = fmt_readchar(S, &p, e);
+    if (*p == '.') ++p, d->precision = fmt_readint(S, "precision", &p, e);
     if (*p != '}') {
         const char *b = p++;
         d->type = *b;
@@ -231,6 +227,7 @@ static void fmt_spec(fmt_State *S, fmt_Spec *d, const char **pp, const char *e) 
 #define FMT_FMTLEN      10 /* "%#.99f" */
 #define FMT_FLTMAXPREC  100
 #define FMT_INTBUFFSIZ  100
+#define FMT_PTRBUFFSIZ  100
 #define FMT_FLTBUFFSIZ  (10 + FMT_FLTMAXPREC + FLT_MAX_10_EXP)
 
 static void fmt_addpadding(fmt_State *S, int ch, size_t len) {
@@ -266,17 +263,15 @@ static void fmt_addzeroing(fmt_State *S, const fmt_Spec *d, size_t len) {
     memset(s, '0', len), luaL_addsize(&S->B, len);
 }
 
-static void fmt_addstring(fmt_State *S, int shrink, size_t width, const fmt_Spec *d) {
-    size_t len, plen;
-    const char *s = lua_tolstring(S->L, fmt_argslot(S), &len);
+static void fmt_addstring(fmt_State *S, int shrink, const fmt_Spec *d, const char *s, size_t len) {
+    size_t plen;
     if (shrink && d->precision)
         len = len > (size_t)d->precision ? (size_t)d->precision : len;
-    if (len > width) {
-        lua_pushvalue(S->L, fmt_argslot(S));
-        luaL_addvalue(&S->B);
+    if (len > (size_t)d->width) {
+        luaL_addlstring(&S->B, s, len);
         return;
     }
-    plen = width - (int)len;
+    plen = d->width - (int)len;
     switch (d->align) {
     case 0:
     case '<': !d->zero || d->grouping == 0 ?
@@ -291,7 +286,7 @@ static void fmt_addstring(fmt_State *S, int shrink, size_t width, const fmt_Spec
     }
 }
 
-static void fmt_dumpstr(fmt_State *S, const fmt_Spec *d) {
+static void fmt_dumpstr(fmt_State *S, const fmt_Spec *d, const char *s, size_t len) {
     fmt_check(S, !d->type || d->type == 's' || d->type == 'p',
             "Unknown format code '%c' for object of type 'string'", d->type);
     fmt_check(S, !d->sign,
@@ -303,22 +298,27 @@ static void fmt_dumpstr(fmt_State *S, const fmt_Spec *d) {
     fmt_check(S, !d->grouping,
             "Grouping form (%c) not allowed in string format specifier",
             d->grouping);
-    fmt_addstring(S, 1, d->width, d);
+    fmt_addstring(S, 1, d, s, len);
 }
 
-static void fmt_pushutf8(fmt_State *S, unsigned long x) {
-    char buff[FMT_UTF8BUFFSIZ], *p = buff + FMT_UTF8BUFFSIZ;
+static size_t fmt_pushutf8(unsigned long x, char buff[FMT_UTF8BUFFSIZ]) {
+    char *p = buff + FMT_UTF8BUFFSIZ;
     unsigned int mfb = 0x3f;
-    if (x < 0x80) { lua_pushfstring(S->L, "%c", x); return; }
-    do {
-        *--p = (char)(0x80 | (x & 0x3f));
-        x >>= 6, mfb >>= 1;
-    } while (x > mfb);
-    *--p = (char)((~mfb << 1) | x);
-    lua_pushlstring(S->L, p, FMT_UTF8BUFFSIZ - (p-buff));
+    if (x < 0x80) 
+        *--p = (char)x;
+    else {
+        do {
+            *--p = (char)(0x80 | (x & 0x3f));
+            x >>= 6, mfb >>= 1;
+        } while (x > mfb);
+        *--p = (char)((~mfb << 1) | x);
+    }
+    return p - buff;
 }
 
 static void fmt_dumpchar(fmt_State *S, lua_Integer cp, const fmt_Spec *d) {
+    char buff[FMT_UTF8BUFFSIZ];
+    size_t loc;
     fmt_check(S, !d->sign,
             "Sign not allowed with integer format specifier 'c'");
     fmt_check(S, !d->alter,
@@ -329,9 +329,8 @@ static void fmt_dumpchar(fmt_State *S, lua_Integer cp, const fmt_Spec *d) {
             "Cannot specify '%c' with 'c'", d->grouping);
     fmt_check(S, cp >= 0 && cp <= INT_MAX,
             "'c' arg not in range(%d)", INT_MAX);
-    fmt_pushutf8(S, (unsigned long)cp);
-    lua_replace(S->L, fmt_argslot(S));
-    fmt_addstring(S, 0, d->width, d);
+    loc = fmt_pushutf8((unsigned long)cp, buff);
+    fmt_addstring(S, 0, d, buff+loc, FMT_UTF8BUFFSIZ-loc);
 }
 
 static int fmt_writesign(int sign, int dsign) {
@@ -359,7 +358,7 @@ static int fmt_writeint(char **pp, lua_Integer v, const fmt_Spec *d) {
     return zeroing;
 }
 
-static void fmt_dumpint(fmt_State *S, lua_Integer v, const fmt_Spec *d) {
+static void fmt_dumpint(fmt_State *S, lua_Integer v, fmt_Spec *d) {
     char buff[FMT_INTBUFFSIZ], *p = buff + FMT_INTBUFFSIZ, *b;
     int sign = !(v < 0), width = d->width;
     if (!sign) v = -v;
@@ -372,12 +371,11 @@ static void fmt_dumpint(fmt_State *S, lua_Integer v, const fmt_Spec *d) {
         if (b > p) luaL_addlstring(&S->B, p, b - p);
         width -= (int)(b - p), p = b;
     }
-    lua_pushlstring(S->L, p, FMT_INTBUFFSIZ - (p-buff));
-    lua_replace(S->L, fmt_argslot(S));
-    fmt_addstring(S, 0, width, d);
+    d->width = width;
+    fmt_addstring(S, 0, d, p, FMT_INTBUFFSIZ-(p-buff));
 }
 
-static int fmt_writeflt(char *s, size_t n, lua_Number v, const fmt_Spec *d) {
+static int fmt_writeflt(char *s, size_t n, lua_Number v, fmt_Spec *d) {
     int type = d->type ? d->type : 'g';
     int (*ptr_snprintf)(char *s, size_t n, const char *fmt, ...) = snprintf;
     char fmt[FMT_FMTLEN];
@@ -388,13 +386,16 @@ static int fmt_writeflt(char *s, size_t n, lua_Number v, const fmt_Spec *d) {
                 d->alter ? "#" : "", d->precision, type, percent);
     else if ((lua_Number)(lua_Integer)v == v)
         ptr_snprintf(fmt, FMT_FMTLEN, "%%.1f%s", percent);
+    else if (!*percent && type == 'g')
+        return d->alter ? snprintf(s, n, "%#g", v) :
+            snprintf(s, n, "%g", v);
     else
         ptr_snprintf(fmt, FMT_FMTLEN, "%%%s%c%s",
                 d->alter ? "#" : "", type, percent);
     return ptr_snprintf(s, n, fmt, v);
 }
 
-static void fmt_dumpflt(fmt_State *S, lua_Number v, const fmt_Spec *d) {
+static void fmt_dumpflt(fmt_State *S, lua_Number v, fmt_Spec *d) {
     int sign = !(v < 0), len, width = d->width;
     char buff[FMT_FLTBUFFSIZ], *p = buff, *dp = p;
     fmt_check(S, d->precision < FMT_FLTMAXPREC,
@@ -409,12 +410,11 @@ static void fmt_dumpflt(fmt_State *S, lua_Number v, const fmt_Spec *d) {
         if (dp > p) luaL_addlstring(&S->B, buff, dp - p);
         width -= (int)(dp - buff), p = dp;
     }
-    lua_pushlstring(S->L, p, len);
-    lua_replace(S->L, fmt_argslot(S));
-    fmt_addstring(S, 0, width, d);
+    d->width = width;
+    fmt_addstring(S, 0, d, p, len);
 }
 
-static void fmt_dumpnumber(fmt_State *S, const fmt_Spec *d) {
+static void fmt_dumpnumber(fmt_State *S, fmt_Spec *d) {
     int type = d->type;
     if (type == 0) type = lua_isinteger(S->L, fmt_argslot(S)) ? 'd' : 'g';
     switch (type) {
@@ -430,19 +430,24 @@ static void fmt_dumpnumber(fmt_State *S, const fmt_Spec *d) {
     }
 }
 
-static void fmt_dump(fmt_State *S, const fmt_Spec *d) {
+static void fmt_dump(fmt_State *S, fmt_Spec *d) {
     int type = lua_type(S->L, fmt_argslot(S));
-    if (type == LUA_TNUMBER) { fmt_dumpnumber(S, d); return; }
-    if (d->type != 'p')
-        luaL_tolstring(S->L, fmt_argslot(S), NULL);
-    else {
+    if (type == LUA_TNUMBER)
+        fmt_dumpnumber(S, d);
+    else if (d->type != 'p') {
+        size_t len;
+        const char *s = luaL_tolstring(S->L, fmt_argslot(S), &len);
+        lua_replace(S->L, fmt_argslot(S));
+        fmt_dumpstr(S, d, s, len);
+    } else {
+        const char *s;
         fmt_check(S, type != LUA_TNIL && type != LUA_TBOOLEAN,
                 "Unknown format code '%c' for object of type '%s'",
                 d->type, lua_typename(S->L, type));
-        lua_pushfstring(S->L, "%p", lua_topointer(S->L, fmt_argslot(S)));
+        s = lua_pushfstring(S->L, "%p", lua_topointer(S->L, fmt_argslot(S)));
+        lua_replace(S->L, fmt_argslot(S));
+        fmt_dumpstr(S, d, s, strlen(s));
     }
-    lua_replace(S->L, fmt_argslot(S));
-    fmt_dumpstr(S, d);
 }
 
 /* format */
